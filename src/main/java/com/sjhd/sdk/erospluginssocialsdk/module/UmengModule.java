@@ -1,25 +1,22 @@
 package com.sjhd.sdk.erospluginssocialsdk.module;
 
+import android.accounts.Account;
 import android.app.Activity;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.Intent;
-
 import android.support.annotation.NonNull;
 import android.text.TextUtils;
-import android.util.Log;
 import android.widget.Toast;
-
-
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.weex.plugin.annotation.WeexModule;
-import com.google.android.gms.auth.api.Auth;
+import com.google.android.gms.auth.GoogleAuthException;
+import com.google.android.gms.auth.GoogleAuthUtil;
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
-import com.google.android.gms.auth.api.signin.GoogleSignInResult;
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
@@ -46,6 +43,7 @@ import com.umeng.socialize.UMShareListener;
 import com.umeng.socialize.bean.SHARE_MEDIA;
 import com.umeng.socialize.utils.SocializeUtils;
 
+import java.io.IOException;
 import java.util.Map;
 
 @WeexModule(name = "SJSocialShare", lazyLoad = true)
@@ -57,6 +55,7 @@ public class UmengModule extends WXModule {
     private static final int RC_SIGN_IN = 0x100;
     private static final int RC_GET_TOKEN = 9002;
     private OnGetLoginInfoListener mOnGetLoginInfoListener;
+    private Account googleAccount;
 
     @JSMethod
     public void initUM(String umengAppKey) {
@@ -87,12 +86,34 @@ public class UmengModule extends WXModule {
     @JSMethod
     public void initGoogle(String model) {
         GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                // .requestServerAuthCode("542556032036-ln22idtl1c98cea7ck3rha5pi82d1jtv.apps.googleusercontent.com")
                 .requestIdToken(model)
                 .requestId()
                 .requestProfile()
                 .requestEmail()
                 .build();
+
         mGoogleSignInClient = GoogleSignIn.getClient(mWXSDKInstance.getContext(), gso);
+
+    }
+
+    @JSMethod(uiThread = false)
+    public void getGoogleRefreshToken(String clientId, JSCallback jsCallback) {
+        if (googleAccount != null) {
+            String mScope = "oauth2:server:client_id:" + clientId + ":api_scope:" + "https://www.googleapis.com/auth/userinfo.email";
+            try {
+                jsCallback.invokeAndKeepAlive(GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), googleAccount, mScope));
+            } catch (IOException e) {
+                jsCallback.invokeAndKeepAlive("");
+                e.printStackTrace();
+            } catch (GoogleAuthException e) {
+                jsCallback.invokeAndKeepAlive("");
+                e.printStackTrace();
+            }
+        } else {
+            jsCallback.invokeAndKeepAlive("");
+        }
+
     }
 
     @JSMethod
@@ -138,7 +159,7 @@ public class UmengModule extends WXModule {
                 break;
             case SharePlatform.P_GOOGLE:
                 if (mGoogleSignInClient == null) {
-                  //  showToast("please Initialization google api.");
+                    //  showToast("please Initialization google api.");
                     fail.invoke("please Initialization google api.");
                     return;
                 }
@@ -148,7 +169,15 @@ public class UmengModule extends WXModule {
                 setOnGetLoginInfoListener(new OnGetLoginInfoListener() {
                     @Override
                     public void setGoogleInfo(GoogleSignInAccount result) {
+                        String scopes = "oauth2:profile email";
 
+                        try {
+                            GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), result.getAccount(), scopes);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        } catch (GoogleAuthException e) {
+                            e.printStackTrace();
+                        }
                         String str = JSON.toJSONString(result);
                         success.invoke(str);
 
@@ -207,7 +236,7 @@ public class UmengModule extends WXModule {
 
             case SharePlatform.P_GOOGLE:
                 if (mGoogleSignInClient == null) {
-                 //   showToast("please Initialization google api.");
+                    //   showToast("please Initialization google api.");
                     fail.invoke("please Initialization google api.");
                     return;
                 }
@@ -230,7 +259,7 @@ public class UmengModule extends WXModule {
         switch (platfrom) {
             case SharePlatform.P_GOOGLE:
                 if (mGoogleSignInClient == null) {
-                   // showToast("please Initialization google api.");
+                    // showToast("please Initialization google api.");
                     fail.invoke("please Initialization google api.");
                     return;
                 }
@@ -238,7 +267,7 @@ public class UmengModule extends WXModule {
                         .addOnCompleteListener((Activity) mWXSDKInstance.getContext(), new OnCompleteListener<GoogleSignInAccount>() {
                             @Override
                             public void onComplete(@NonNull Task<GoogleSignInAccount> task) {
-                                try{
+                                try {
                                     GoogleSignInAccount account = task.getResult(ApiException.class);
                                     String str = JSON.toJSONString(account);
 
@@ -314,7 +343,7 @@ public class UmengModule extends WXModule {
             SocializeUtils.safeCloseDialog(dialog);
 
             if (success != null) {
-               // Toast.makeText(mContext, "success", Toast.LENGTH_LONG).show();
+                // Toast.makeText(mContext, "success", Toast.LENGTH_LONG).show();
                 success.invoke("Success");
             }
 
@@ -324,7 +353,7 @@ public class UmengModule extends WXModule {
         public void onError(SHARE_MEDIA platform, Throwable t) {
             SocializeUtils.safeCloseDialog(dialog);
             if (fail != null) {
-               // Toast.makeText(mContext, t.getMessage(), Toast.LENGTH_LONG).show();
+                // Toast.makeText(mContext, t.getMessage(), Toast.LENGTH_LONG).show();
                 fail.invoke(t.getMessage());
             }
 
@@ -367,10 +396,10 @@ public class UmengModule extends WXModule {
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == RC_GET_TOKEN) {
-            try{
+            try {
                 Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
                 GoogleSignInAccount account = task.getResult(ApiException.class);
-                //String str = JSON.toJSONString(account);
+                String str = JSON.toJSONString(account);
 
                 mOnGetLoginInfoListener.setGoogleInfo(account);
 
@@ -388,6 +417,7 @@ public class UmengModule extends WXModule {
 
     interface OnGetLoginInfoListener {
         void setGoogleInfo(GoogleSignInAccount result);
+
         void failEvent(String result);
     }
 
