@@ -13,6 +13,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.weex.plugin.annotation.WeexModule;
 import com.google.android.gms.auth.GoogleAuthException;
 import com.google.android.gms.auth.GoogleAuthUtil;
+import com.google.android.gms.auth.UserRecoverableAuthException;
 import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
@@ -55,6 +56,7 @@ public class UmengModule extends WXModule {
     private static final int RC_SIGN_IN = 0x100;
     private static final int RC_GET_TOKEN = 9002;
     private OnGetLoginInfoListener mOnGetLoginInfoListener;
+    private OnGetGoogleRefreshTokenListener mOnGetGoogleRefreshTokenListener ;
     private Account googleAccount;
 
     @JSMethod
@@ -97,17 +99,31 @@ public class UmengModule extends WXModule {
 
     }
 
+    int AUTH_CODE_REQUEST_CODE = 1000;
+
     @JSMethod(uiThread = false)
-    public void getGoogleRefreshToken(String clientId, JSCallback jsCallback) {
+    public void getGoogleRefreshToken(String clientId, final JSCallback jsCallback) {
         if (googleAccount != null) {
-            String mScope = "oauth2:server:client_id:" + clientId + ":api_scope:" + "https://www.googleapis.com/auth/userinfo.email";
+            String mScope = "oauth2:server:client_id:" + clientId + ":api_scope:" + "https://www.googleapis.com/auth/userinfo.profile";
             try {
                 jsCallback.invokeAndKeepAlive(GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), googleAccount, mScope));
             } catch (IOException e) {
                 jsCallback.invokeAndKeepAlive("");
                 e.printStackTrace();
+            } catch (UserRecoverableAuthException e) {
+
+                e.printStackTrace();
+                Activity activity = (Activity) mWXSDKInstance.getContext();
+                setOnGetGoogleRefreshTokenListener(new OnGetGoogleRefreshTokenListener() {
+                    @Override
+                    public void getRefreshToken(String result) {
+                        jsCallback.invokeAndKeepAlive(result);
+                    }
+                });
+                activity.startActivityForResult(e.getIntent(), AUTH_CODE_REQUEST_CODE);
+
+
             } catch (GoogleAuthException e) {
-                jsCallback.invokeAndKeepAlive("");
                 e.printStackTrace();
             }
         } else {
@@ -169,15 +185,7 @@ public class UmengModule extends WXModule {
                 setOnGetLoginInfoListener(new OnGetLoginInfoListener() {
                     @Override
                     public void setGoogleInfo(GoogleSignInAccount result) {
-                        String scopes = "oauth2:profile email";
-
-                        try {
-                            GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), result.getAccount(), scopes);
-                        } catch (IOException e) {
-                            e.printStackTrace();
-                        } catch (GoogleAuthException e) {
-                            e.printStackTrace();
-                        }
+                        googleAccount = result.getAccount();
                         String str = JSON.toJSONString(result);
                         success.invoke(str);
 
@@ -408,7 +416,10 @@ public class UmengModule extends WXModule {
                 mOnGetLoginInfoListener.failEvent(message);
             }
 
-        } else {
+        }else if (requestCode == AUTH_CODE_REQUEST_CODE){
+
+            mOnGetGoogleRefreshTokenListener.getRefreshToken("error");
+        }else {
             UMShareAPI.get(mWXSDKInstance.getContext()).onActivityResult(requestCode, resultCode, data);
         }
 
@@ -427,6 +438,15 @@ public class UmengModule extends WXModule {
 
     private void setOnGetLoginInfoListener(OnGetLoginInfoListener listener) {
         mOnGetLoginInfoListener = listener;
+    }
+
+    interface OnGetGoogleRefreshTokenListener {
+        void getRefreshToken(String result);
+
+    }
+
+    private void setOnGetGoogleRefreshTokenListener(OnGetGoogleRefreshTokenListener listener) {
+        mOnGetGoogleRefreshTokenListener = listener;
     }
 
 }
