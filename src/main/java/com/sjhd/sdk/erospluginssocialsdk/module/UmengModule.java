@@ -27,6 +27,8 @@ import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareMusicAchiever;
 import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareTextAchiever;
 import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareTextImageAchiever;
 import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareWebAchiever;
+import com.sjhd.sdk.erospluginssocialsdk.model.GoogleAccountDto;
+import com.sjhd.sdk.erospluginssocialsdk.model.GoogleApiExceptionDto;
 import com.sjhd.sdk.erospluginssocialsdk.model.ShareInfoBean;
 import com.sjhd.sdk.erospluginssocialsdk.model.ShareMediaType;
 import com.sjhd.sdk.erospluginssocialsdk.model.SharePlatform;
@@ -56,8 +58,9 @@ public class UmengModule extends WXModule {
     private static final int RC_SIGN_IN = 0x100;
     private static final int RC_GET_TOKEN = 9002;
     private OnGetLoginInfoListener mOnGetLoginInfoListener;
-    private OnGetGoogleRefreshTokenListener mOnGetGoogleRefreshTokenListener ;
+    private OnGetGoogleRefreshTokenListener mOnGetGoogleRefreshTokenListener;
     private Account googleAccount;
+    private String googleClientId = "";
 
     @JSMethod
     public void initUM(String umengAppKey) {
@@ -94,7 +97,7 @@ public class UmengModule extends WXModule {
                 .requestProfile()
                 .requestEmail()
                 .build();
-
+        googleClientId = model;
         mGoogleSignInClient = GoogleSignIn.getClient(mWXSDKInstance.getContext(), gso);
 
     }
@@ -184,15 +187,15 @@ public class UmengModule extends WXModule {
 
                 setOnGetLoginInfoListener(new OnGetLoginInfoListener() {
                     @Override
-                    public void setGoogleInfo(GoogleSignInAccount result) {
-                        googleAccount = result.getAccount();
+                    public void setGoogleInfo(GoogleAccountDto result) {
+
                         String str = JSON.toJSONString(result);
-                        success.invoke(str);
+                        success.invoke(result);
 
                     }
 
                     @Override
-                    public void failEvent(String result) {
+                    public void failEvent(GoogleApiExceptionDto result) {
                         fail.invoke(result);
                     }
                 });
@@ -406,20 +409,64 @@ public class UmengModule extends WXModule {
         if (requestCode == RC_GET_TOKEN) {
             try {
                 Task<GoogleSignInAccount> task = GoogleSignIn.getSignedInAccountFromIntent(data);
-                GoogleSignInAccount account = task.getResult(ApiException.class);
+                final GoogleSignInAccount account = task.getResult(ApiException.class);
                 String str = JSON.toJSONString(account);
 
-                mOnGetLoginInfoListener.setGoogleInfo(account);
+                final GoogleAccountDto dto = JSON.parseObject(str, GoogleAccountDto.class);
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (account != null) {
+                            String mScope = "oauth2:server:client_id:" + googleClientId + ":api_scope:" + "https://www.googleapis.com/auth/userinfo.profile";
+                            try {
+                               // googleAccount = dto.getAccount();
+                                googleAccount = new Account(dto.getAccount().getName(),dto.getAccount().getType());
+                                String refreshToken = GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), googleAccount, mScope);
+                                dto.setRefreshToken(refreshToken);
+                                mOnGetLoginInfoListener.setGoogleInfo(dto);
+                            } catch (IOException e) {
+                                mOnGetLoginInfoListener.failEvent(GoogleApiExceptionDto.newGoogleApiExceptionDto()
+                                        .errorMsg("get refreshToken fail!")
+                                        .build());
+                                e.printStackTrace();
+                            } catch (UserRecoverableAuthException e) {
+
+                                e.printStackTrace();
+                                Activity activity = (Activity) mWXSDKInstance.getContext();
+
+                                activity.startActivityForResult(e.getIntent(), AUTH_CODE_REQUEST_CODE);
+
+
+                            } catch (GoogleAuthException e) {
+                                e.printStackTrace();
+                            }
+                        } else {
+                            mOnGetLoginInfoListener.failEvent(GoogleApiExceptionDto.newGoogleApiExceptionDto()
+                                    .errorMsg("login failed")
+                                    .build());
+                        }
+
+                    }
+                }).start();
+
 
             } catch (ApiException e) {
                 String message = e.toString();
-                mOnGetLoginInfoListener.failEvent(message);
+                mOnGetLoginInfoListener.failEvent(GoogleApiExceptionDto.newGoogleApiExceptionDto()
+                        .errorMsg("login failed," + message)
+                        .build());
             }
 
-        }else if (requestCode == AUTH_CODE_REQUEST_CODE){
+        } else if (requestCode == AUTH_CODE_REQUEST_CODE) {
 
-            mOnGetGoogleRefreshTokenListener.getRefreshToken("error");
-        }else {
+//            mOnGetLoginInfoListener.failEvent(GoogleApiExceptionDto.newGoogleApiExceptionDto()
+//                    .errorMsg("Need permissions,try again please.")
+//                    .build());
+            Intent signInIntent = mGoogleSignInClient.getSignInIntent();
+            ((Activity) (mWXSDKInstance.getContext())).startActivityForResult(signInIntent, RC_GET_TOKEN);
+         //   mOnGetGoogleRefreshTokenListener.getRefreshToken("error");
+        } else {
             UMShareAPI.get(mWXSDKInstance.getContext()).onActivityResult(requestCode, resultCode, data);
         }
 
@@ -427,9 +474,9 @@ public class UmengModule extends WXModule {
     }
 
     interface OnGetLoginInfoListener {
-        void setGoogleInfo(GoogleSignInAccount result);
+        void setGoogleInfo(GoogleAccountDto result);
 
-        void failEvent(String result);
+        void failEvent(GoogleApiExceptionDto result);
     }
 
     private void showToast(String msg) {
