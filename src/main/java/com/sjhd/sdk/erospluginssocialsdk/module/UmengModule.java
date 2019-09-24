@@ -21,6 +21,10 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.Task;
+import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeTokenRequest;
+import com.google.api.client.googleapis.auth.oauth2.GoogleTokenResponse;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.jackson2.JacksonFactory;
 import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareImageAchiever;
 import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareMiniProgramAchiever;
 import com.sjhd.sdk.erospluginssocialsdk.achiever.ShareMusicAchiever;
@@ -61,6 +65,8 @@ public class UmengModule extends WXModule {
     private OnGetGoogleRefreshTokenListener mOnGetGoogleRefreshTokenListener;
     private Account googleAccount;
     private String googleClientId = "";
+    private String googleClientSecret = "";
+    private String googleRedirectUri = "";
 
     @JSMethod
     public void initUM(String umengAppKey) {
@@ -89,15 +95,18 @@ public class UmengModule extends WXModule {
     }
 
     @JSMethod
-    public void initGoogle(String model) {
+    public void initGoogle(String clientId, String clientSecret, String redirectUri) {
         GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
                 // .requestServerAuthCode("542556032036-ln22idtl1c98cea7ck3rha5pi82d1jtv.apps.googleusercontent.com")
-                .requestIdToken(model)
+                .requestIdToken(clientId)
                 .requestId()
                 .requestProfile()
                 .requestEmail()
+                .requestServerAuthCode(clientId, true)
                 .build();
-        googleClientId = model;
+        googleClientId = clientId;
+        this.googleClientSecret = clientSecret;
+        this.googleRedirectUri = redirectUri;
         mGoogleSignInClient = GoogleSignIn.getClient(mWXSDKInstance.getContext(), gso);
 
     }
@@ -420,9 +429,15 @@ public class UmengModule extends WXModule {
                         if (account != null) {
                             String mScope = "oauth2:server:client_id:" + googleClientId + ":api_scope:" + "https://www.googleapis.com/auth/userinfo.profile";
                             try {
-                               // googleAccount = dto.getAccount();
-                                googleAccount = new Account(dto.getAccount().getName(),dto.getAccount().getType());
-                                String refreshToken = GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), googleAccount, mScope);
+                                // googleAccount = dto.getAccount();
+                                //   googleAccount = new Account(dto.getAccount().getName(),dto.getAccount().getType());
+                                //   String authcode = GoogleAuthUtil.getToken(mWXSDKInstance.getContext(), googleAccount, mScope);
+                                GoogleTokenResponse response =
+                                        new GoogleAuthorizationCodeTokenRequest(new NetHttpTransport(), new JacksonFactory(),
+                                                googleClientId, googleClientSecret,
+                                                account.getServerAuthCode(), googleRedirectUri)
+                                                .execute();
+                                String refreshToken = response.getRefreshToken();
                                 dto.setRefreshToken(refreshToken);
                                 mOnGetLoginInfoListener.setGoogleInfo(dto);
                             } catch (IOException e) {
@@ -430,17 +445,18 @@ public class UmengModule extends WXModule {
                                         .errorMsg("get refreshToken fail!")
                                         .build());
                                 e.printStackTrace();
-                            } catch (UserRecoverableAuthException e) {
-
-                                e.printStackTrace();
-                                Activity activity = (Activity) mWXSDKInstance.getContext();
-
-                                activity.startActivityForResult(e.getIntent(), AUTH_CODE_REQUEST_CODE);
-
-
-                            } catch (GoogleAuthException e) {
-                                e.printStackTrace();
                             }
+//                            catch (UserRecoverableAuthException e) {
+//
+//                                e.printStackTrace();
+//                                Activity activity = (Activity) mWXSDKInstance.getContext();
+//
+//                                activity.startActivityForResult(e.getIntent(), AUTH_CODE_REQUEST_CODE);
+//
+//
+//                            } catch (GoogleAuthException e) {
+//                                e.printStackTrace();
+//                            }
                         } else {
                             mOnGetLoginInfoListener.failEvent(GoogleApiExceptionDto.newGoogleApiExceptionDto()
                                     .errorMsg("login failed")
@@ -465,7 +481,7 @@ public class UmengModule extends WXModule {
 //                    .build());
             Intent signInIntent = mGoogleSignInClient.getSignInIntent();
             ((Activity) (mWXSDKInstance.getContext())).startActivityForResult(signInIntent, RC_GET_TOKEN);
-         //   mOnGetGoogleRefreshTokenListener.getRefreshToken("error");
+            //   mOnGetGoogleRefreshTokenListener.getRefreshToken("error");
         } else {
             UMShareAPI.get(mWXSDKInstance.getContext()).onActivityResult(requestCode, resultCode, data);
         }
